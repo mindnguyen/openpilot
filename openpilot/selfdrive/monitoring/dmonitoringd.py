@@ -3,6 +3,9 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process
 from openpilot.selfdrive.monitoring.policy import DriverMonitoring
+from openpilot.cereal import log
+
+AlertLevel = log.DriverMonitoringState.AlertLevel
 
 
 def dmonitoringd_thread():
@@ -15,6 +18,7 @@ def dmonitoringd_thread():
 
   DM = DriverMonitoring(rhd_saved=params.get_bool("IsRhdDetected"), always_on=params.get_bool("AlwaysOnDM"))
   demo_mode=False
+  dm_disabled = params.get_bool("DisableDriverMonitoring")
 
   # 20Hz <- dmonitoringmodeld
   while True:
@@ -24,7 +28,16 @@ def dmonitoringd_thread():
       continue
 
     valid = sm.all_checks()
-    if demo_mode and sm.valid['driverStateV2']:
+    if dm_disabled and not demo_mode:
+      # Driver monitoring forced off by the user (DisableDriverMonitoring): never raise
+      # distraction/unresponsive alerts, never lock out and never request a forced
+      # deceleration. The model keeps running so the driver camera preview still works.
+      DM.alert_level = AlertLevel.none
+      DM.lockout_active = False
+      DM.always_on = False
+      DM.awareness = 1.
+      DM.cnt_since_alert_3 = 0
+    elif demo_mode and sm.valid['driverStateV2']:
       DM.run_step(sm, demo=True)
     elif valid:
       DM.run_step(sm, demo=demo_mode)
@@ -35,7 +48,8 @@ def dmonitoringd_thread():
 
     # load live always-on toggle
     if sm['driverStateV2'].frameId % 40 == 1:
-      DM.always_on = params.get_bool("AlwaysOnDM")
+      dm_disabled = params.get_bool("DisableDriverMonitoring")
+      DM.always_on = params.get_bool("AlwaysOnDM") and not dm_disabled
       demo_mode = params.get_bool("IsDriverViewEnabled")
 
     # save rhd virtual toggle every 5 mins
