@@ -187,6 +187,9 @@ procs += [
   # mapd
   NativeProcess("mapd", Paths.mapd_root(), ["bash", "-c", f"{MAPD_PATH} > /dev/null 2>&1"], mapd_ready),
   PythonProcess("mapd_manager", "openpilot.sunnypilot.mapd.mapd_manager", always_run),
+  # commaview: LAN dashboard for the phone (/data/commaview, port 8099). Runs on and off road; skipped when not installed.
+  NativeProcess("commaview", "/data/commaview", ["/usr/local/venv/bin/python", "/data/commaview/commaview.py"], always_run,
+                enabled=os.path.exists("/data/commaview/commaview.py")),
 
   # locationd
   NativeProcess("locationd_llk", "openpilot/sunnypilot/selfdrive/locationd", ["./locationd"], only_onroad),
