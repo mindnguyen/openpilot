@@ -11,6 +11,7 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.navigation.helpers import latest_gps_source
 from openpilot.selfdrive.navigation.route import along_path, local_meters
+from openpilot.selfdrive.navigation import providers
 
 REROUTE_DISTANCE = 25
 MANEUVER_TRANSITION_THRESHOLD = 10
@@ -30,7 +31,14 @@ def set_banner(instruction, banners, distance_to_maneuver):
   instruction.maneuverType = primary.get('type') or ''
   instruction.maneuverModifier = primary.get('modifier') or ''
   if banner.get('secondary') is not None:
-    instruction.maneuverSecondaryText = banner['secondary']['text']
+    instruction.maneuverSecondaryText = banner['secondary'].get('text') or ''
+  # lane guidance (Mapbox "lane" components; VietMap uses the same dialect)
+  lanes = providers.banner_lanes(banner)
+  lane_list = instruction.init('lanes', len(lanes))
+  for i, ln in enumerate(lanes):
+    lane_list[i].directions = ln['directions']
+    lane_list[i].active = ln['active']
+    lane_list[i].activeDirection = ln['activeDirection']
 
 
 class RouteEngine:
@@ -51,8 +59,11 @@ class RouteEngine:
     self.reroute_counter = 0
 
     self.mapbox_token = os.environ.get("MAPBOX_TOKEN")
-    self.api = Api(self.params.get("DongleId")) if self.mapbox_token is None else None
-    self.mapbox_host = "https://api.mapbox.com" if self.mapbox_token is not None else API_HOST.rstrip('/') + '/v1/nav'
+    self.provider_cfg = providers.load_config()
+    self.provider = providers.provider_name(self.provider_cfg, self.mapbox_token)
+    self.api = Api(self.params.get("DongleId")) if self.provider == "comma" else None
+    self.comma_host = API_HOST.rstrip('/') + '/v1/nav'
+    cloudlog.warning(f"navd route provider: {self.provider}")
 
   def update(self):
     self.sm.update(0)
@@ -101,41 +112,38 @@ class RouteEngine:
     if lang is not None:
       lang = lang.replace('main_', '')
 
-    token = self.mapbox_token
-    if token is None:
-      token = self.api.get_token()
+    # the provider config file can change while driving (key added, provider switched)
+    self.provider_cfg = providers.load_config()
+    self.provider = providers.provider_name(self.provider_cfg, self.mapbox_token)
+    comma_token = None
+    if self.provider == "comma":
+      if self.api is None:
+        self.api = Api(self.params.get("DongleId"))
+      comma_token = self.api.get_token()
 
-    params = {
-      'access_token': token,
-      'geometries': 'geojson',
-      'overview': 'full',
-      'steps': 'true',
-      'banner_instructions': 'true',
-      'alternatives': 'false',
-      'language': lang,
-    }
-    if self.last_bearing is not None:
-      params['bearings'] = f"{(self.last_bearing + 360) % 360:.0f},90;"
-
-    coords_str = ';'.join(f'{lon},{lat}' for lon, lat in (self.last_position, destination))
-    url = self.mapbox_host + '/directions/v5/mapbox/driving-traffic/' + coords_str
+    url, params = providers.build_request(self.provider_cfg, self.provider, self.last_position, destination,
+                                          self.last_bearing, lang, comma_token=comma_token,
+                                          mapbox_env_token=self.mapbox_token, comma_host=self.comma_host)
     try:
       resp = requests.get(url, params=params, timeout=10)
       if resp.status_code != 200:
-        cloudlog.event("API request failed", status_code=resp.status_code, text=resp.text, error=True)
+        cloudlog.event("API request failed", status_code=resp.status_code, text=resp.text[:500], provider=self.provider, error=True)
       resp.raise_for_status()
 
       r = resp.json()
-      if len(r['routes']):
-        self.route = r['routes'][0]['legs'][0]['steps']
+      if len(r.get('routes', [])):
+        steps = providers.normalize_steps(r['routes'][0]['legs'][0]['steps'], near=self.last_position)
+        self.route = steps
         self.route_geometry = [np.array(step['geometry']['coordinates'], dtype=np.float64).reshape((-1, 2)) for step in self.route]
         self.step_idx = 0
+        cloudlog.warning(f"navd route from {self.provider}: {len(steps)} steps, "
+                         f"{sum(s['distance'] for s in steps) / 1000:.1f} km")
       else:
-        cloudlog.warning("Got empty route response")
+        cloudlog.warning(f"Got empty route response from {self.provider}: {str(r)[:200]}")
         self.clear_route()
 
-    except requests.exceptions.RequestException:
-      cloudlog.exception("failed to get route")
+    except (requests.exceptions.RequestException, ValueError, KeyError, TypeError):
+      cloudlog.exception(f"failed to get route from {self.provider}")
       self.clear_route()
 
   def send_instruction(self):
