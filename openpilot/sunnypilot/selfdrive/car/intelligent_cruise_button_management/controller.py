@@ -44,21 +44,90 @@ class IntelligentCruiseButtonManagement:
     self.v_target_ms_last = 0.0
     self.is_metric = False
 
+    # driver override: after the driver touches +/-/set, hold their speed until a different limit shows up
+    self.driver_override = False
+    self.override_limit_ms: float | None = None
+    self.driver_set_ms = 0.0
+    self._capture_set_frames = 0
+
     self.cruise_button_timers = CRUISE_BUTTON_TIMER
 
   @property
   def v_cruise_equal(self) -> bool:
     return self.v_target == self.v_cruise_cluster
 
+  @staticmethod
+  def resolved_limit(LP_SP: custom.LongitudinalPlanSP) -> float | None:
+    res = LP_SP.speedLimit.resolver
+    return float(res.speedLimitFinal) if (res.speedLimitValid and res.speedLimitFinal > 0.) else None
+
+  @staticmethod
+  def curve_targets(LP_SP: custom.LongitudinalPlanSP) -> list[float]:
+    """Smart cruise control vision/map targets, only while they are actively slowing the car."""
+    scc = LP_SP.smartCruiseControl
+    out = []
+    if scc.vision.active and 0. < scc.vision.vTarget < 100.:
+      out.append(float(scc.vision.vTarget))
+    if scc.map.active and 0. < scc.map.vTarget < 100.:
+      out.append(float(scc.map.vTarget))
+    return out
+
+  @classmethod
+  def speed_limit_target(cls, LP_SP: custom.LongitudinalPlanSP) -> float | None:
+    """Plain limit-following target (no driver override), in m/s, or None when nothing should move the set speed.
+
+    With stock ACC the generic plan target (LP_SP.vTarget) tracks the current speed, so following it
+    drags the set speed down to the minimum.  Only use sources that mean something for a set speed:
+    the resolved speed limit (car sign camera / map, with the user's offset) and the smart cruise
+    control curve targets while they are actively slowing the car.
+    """
+    cands = cls.curve_targets(LP_SP)
+    limit = cls.resolved_limit(LP_SP)
+    if limit is not None:
+      cands.append(limit)
+    return min(cands) if cands else None
+
+  def update_driver_override(self, CS: car.CarState, limit_ms: float | None) -> None:
+    """The driver's +/-/set press wins over a (possibly misread) sign until a different limit appears."""
+    for b in CS.buttonEvents:
+      if b.pressed and b.type in (car.CarState.ButtonEvent.Type.accelCruise, car.CarState.ButtonEvent.Type.decelCruise,
+                                  car.CarState.ButtonEvent.Type.setCruise):
+        self.driver_override = True
+        self.override_limit_ms = limit_ms
+        self._capture_set_frames = 5  # the cluster value lags the press by a few frames
+    if self._capture_set_frames > 0:
+      self._capture_set_frames -= 1
+      self.driver_set_ms = float(CS.cruiseState.speedCluster)
+    if self.driver_override and limit_ms is not None:
+      if self.override_limit_ms is None or abs(limit_ms - self.override_limit_ms) > 0.3:
+        self.driver_override = False  # a new sign: follow the limit again
+
   def update_calculations(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> None:
     speed_conv = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
     ms_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
 
-    self.v_target_ms_last = apply_hysteresis(LP_SP.vTarget, self.v_target_ms_last, HYST_GAP * ms_conv)
-
-    self.v_target = round(self.v_target_ms_last * speed_conv)
     self.v_cruise_min = get_minimum_set_speed(self.is_metric)
     self.v_cruise_cluster = round(CS.cruiseState.speedCluster * speed_conv)
+
+    limit = self.resolved_limit(LP_SP)
+    self.update_driver_override(CS, limit)
+
+    cands = self.curve_targets(LP_SP)
+    if self.driver_override:
+      if self.driver_set_ms > 0. and self._capture_set_frames == 0:
+        cands.append(self.driver_set_ms)  # base = what the driver set; curves may still lower it temporarily
+    elif limit is not None:
+      cands.append(limit)
+    target_ms = min(cands) if cands else None
+
+    if target_ms is None:
+      # no speed limit and no curve slowdown: leave the driver's set speed alone
+      self.v_target_ms_last = CS.cruiseState.speedCluster
+      self.v_target = self.v_cruise_cluster
+      return
+
+    self.v_target_ms_last = apply_hysteresis(target_ms, self.v_target_ms_last, HYST_GAP * ms_conv)
+    self.v_target = max(round(self.v_target_ms_last * speed_conv), self.v_cruise_min)
 
   def update_state_machine(self) -> custom.IntelligentCruiseButtonManagement.SendButtonState:
     self.pre_active_timer = max(0, self.pre_active_timer - 1)
