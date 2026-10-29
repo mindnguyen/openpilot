@@ -44,11 +44,14 @@ class IntelligentCruiseButtonManagement:
     self.v_target_ms_last = 0.0
     self.is_metric = False
 
-    # driver override: after the driver touches +/-/set, hold their speed until a different limit shows up
+    # driver override: a deliberate +/- press past the limit while engaged holds the driver's speed until a
+    # different limit shows up.  SET/RESUME (engaging) and presses towards the limit never arm it.
     self.driver_override = False
     self.override_limit_ms: float | None = None
     self.driver_set_ms = 0.0
     self._capture_set_frames = 0
+    self._pending_press: tuple[int, float | None] | None = None
+    self.cruise_enabled_prev = False
 
     self.cruise_button_timers = CRUISE_BUTTON_TIMER
 
@@ -88,16 +91,43 @@ class IntelligentCruiseButtonManagement:
     return min(cands) if cands else None
 
   def update_driver_override(self, CS: car.CarState, limit_ms: float | None) -> None:
-    """The driver's +/-/set press wins over a (possibly misread) sign until a different limit appears."""
-    for b in CS.buttonEvents:
-      if b.pressed and b.type in (car.CarState.ButtonEvent.Type.accelCruise, car.CarState.ButtonEvent.Type.decelCruise,
-                                  car.CarState.ButtonEvent.Type.setCruise):
-        self.driver_override = True
-        self.override_limit_ms = limit_ms
-        self._capture_set_frames = 5  # the cluster value lags the press by a few frames
-    if self._capture_set_frames > 0:
+    """The driver's +/- press past the (possibly misread) sign wins until a different limit appears.
+
+    Only presses made while cruise was already engaged count (SET/RESUME engage the car's ACC and must not be
+    mistaken for a speed choice), and only when the resulting set speed went beyond the limit in the pressed
+    direction; a press that merely moves towards the limit lets ICBM keep going.  Logged 2026-10-30: the old
+    rule latched the engage SET at 29 km/h and then fought the driver's RESUME presses.
+    """
+    enabled = bool(CS.cruiseState.enabled)
+    if not enabled:
+      if self.cruise_enabled_prev:  # disengaged: next engagement starts fresh
+        self.driver_override = False
+        self._pending_press = None
+        self._capture_set_frames = 0
+      self.cruise_enabled_prev = False
+      return
+    if self.cruise_enabled_prev:
+      for b in CS.buttonEvents:
+        if b.pressed and b.type in (car.CarState.ButtonEvent.Type.accelCruise, car.CarState.ButtonEvent.Type.decelCruise):
+          self._pending_press = (1 if b.type == car.CarState.ButtonEvent.Type.accelCruise else -1, limit_ms)
+          self._capture_set_frames = 20  # the cluster value lags the press; judge it 0.2 s later
+    self.cruise_enabled_prev = True
+    if self._pending_press is not None and self._capture_set_frames > 0:
       self._capture_set_frames -= 1
-      self.driver_set_ms = float(CS.cruiseState.speedCluster)
+      if self._capture_set_frames == 0:
+        direction, lim_at_press = self._pending_press
+        self._pending_press = None
+        after_ms = float(CS.cruiseState.speedCluster)
+        if lim_at_press is None:
+          arm = True  # nothing to follow: keep what the driver chose
+        elif direction > 0:
+          arm = after_ms > lim_at_press + 0.3
+        else:
+          arm = after_ms < lim_at_press - 0.3
+        if arm:
+          self.driver_override = True
+          self.driver_set_ms = after_ms
+          self.override_limit_ms = lim_at_press
     if self.driver_override and limit_ms is not None:
       if self.override_limit_ms is None or abs(limit_ms - self.override_limit_ms) > 0.3:
         self.driver_override = False  # a new sign: follow the limit again
@@ -114,10 +144,10 @@ class IntelligentCruiseButtonManagement:
 
     cands = self.curve_targets(LP_SP)
     if self.driver_override:
-      if self.driver_set_ms > 0. and self._capture_set_frames == 0:
-        cands.append(self.driver_set_ms)  # base = what the driver set; curves may still lower it temporarily
-    elif limit is not None:
-      cands.append(limit)
+      if self.driver_set_ms > 0.:
+        cands.append(self.driver_set_ms)  # base = what the driver chose; curves may still lower it temporarily
+    elif limit is not None and self._pending_press is None:
+      cands.append(limit)  # while a driver press is being judged, do not pull against it
     target_ms = min(cands) if cands else None
 
     if target_ms is None:
