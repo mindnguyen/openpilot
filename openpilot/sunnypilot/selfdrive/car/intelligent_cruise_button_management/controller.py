@@ -146,6 +146,7 @@ class IntelligentCruiseButtonManagement:
     self.override_limit_ms = self.resolved_limit(LP_SP)
     self.driver_set_ms = target * ms_conv
     self._capture_set_frames = 0  # nothing to read back from the cluster: the target is known
+    self._pending_press = None  # the voice command is newer than any driver press still being judged
     return True
 
   def update_calculations(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> None:

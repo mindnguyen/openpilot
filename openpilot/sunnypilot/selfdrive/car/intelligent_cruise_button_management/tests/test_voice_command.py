@@ -76,9 +76,27 @@ def test_driver_button_wins_over_voice():
   icbm = make_icbm()
   icbm.apply_voice_command(voice(50), car_state(80), plan())
   icbm.run(car_state(80, buttons=[ButtonType.accelCruise]), CC, plan(), True)
-  for _ in range(6):                  # the cluster value is captured a few frames after the press
+  for _ in range(25):                 # the press is judged on the cluster value 0.2 s later
     icbm.run(car_state(81), CC, plan(), True)
   assert icbm.v_target == 81
+
+
+def test_disengage_clears_voice_target():
+  icbm = make_icbm()
+  icbm.run(car_state(80), CC, plan(limit_kph=80), True)
+  icbm.apply_voice_command(voice(50), car_state(80), plan(limit_kph=80))
+  icbm.run(car_state(80, enabled=False), CC, plan(limit_kph=80), True)
+  icbm.run(car_state(80), CC, plan(limit_kph=80), True)
+  assert icbm.v_target == 80          # re-engaged: follow the sign again, the old voice speed is gone
+
+
+def test_voice_overrides_a_driver_press_still_being_judged():
+  icbm = make_icbm()
+  icbm.run(car_state(80, buttons=[ButtonType.decelCruise]), CC, plan(), True)
+  assert icbm.apply_voice_command(voice(50), car_state(79), plan())
+  for _ in range(25):
+    icbm.run(car_state(79), CC, plan(), True)
+  assert icbm.v_target == 50          # the earlier "-" press must not replace the voice speed
 
 
 def test_rejected_commands():

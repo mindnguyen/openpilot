@@ -164,7 +164,8 @@ class SelfdriveD:
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
-    self.ignored_processes = {'mapd', }
+    # voiced is a convenience: if it dies, voice commands stop, but driving must never be disengaged for it
+    self.ignored_processes = {'mapd', 'voiced', }
 
     # Determine startup event
     is_remote = build_metadata.openpilot.comma_remote or build_metadata.openpilot.sunnypilot_remote
