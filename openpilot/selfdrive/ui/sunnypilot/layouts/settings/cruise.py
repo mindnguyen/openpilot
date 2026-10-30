@@ -47,6 +47,12 @@ class CruiseLayout(Widget):
       description="",
       param="IntelligentCruiseButtonManagement")
 
+    self.voice_toggle = toggle_item_sp(
+      title=tr("Voice Set Speed (Hi Comma)"),
+      description=tr("Change the ICBM set speed by voice, e.g. \"Hi Comma, giam ve 50\". Needs ICBM and Vosk "
+                     "installed under /data/voice (install_vosk.sh). Takes effect on the next drive."),
+      param="VoiceCruiseControl")
+
     self.scc_v_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Vision"),
       description=tr("Use vision path predictions to estimate the appropriate speed to drive through turns ahead."),
@@ -84,6 +90,7 @@ class CruiseLayout(Widget):
 
     items = [
       self.icbm_toggle,
+      self.voice_toggle,
       self.scc_v_toggle,
       self.scc_m_toggle,
       self.custom_acc_toggle,
@@ -123,6 +130,7 @@ class CruiseLayout(Widget):
       else:
         ui_state.params.remove("IntelligentCruiseButtonManagement")
         self.icbm_toggle.action_item.set_enabled(False)
+        ui_state.params.remove("VoiceCruiseControl")
 
         long_desc = ICMB_UNAVAILABLE
         if has_long:
@@ -135,6 +143,8 @@ class CruiseLayout(Widget):
         if self.icbm_toggle.description != new_desc:
           self.icbm_toggle.set_description(new_desc)
           self.icbm_toggle.show_description(True)
+
+      self.voice_toggle.action_item.set_enabled(has_icbm)
 
       if has_long or has_icbm:
         self.custom_acc_toggle.action_item.set_enabled(((has_long and not ui_state.CP.pcmCruise) or has_icbm) and ui_state.is_offroad())

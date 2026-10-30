@@ -73,6 +73,26 @@ def speed_limit_pre_active_alert(CP: car.CarParams, CS: car.CarState, sm: messag
     Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleLow, .1)
 
 
+def voice_cruise_set_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  vc = sm['voiceCommand']
+  unit = "km/h" if vc.isMetric else "mph"
+  return Alert(
+    f"Voice: set speed {round(vc.targetSpeed)} {unit}",
+    "",
+    AlertStatus.normal, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 3.)
+
+
+def voice_cruise_rejected_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  vc = sm['voiceCommand']
+  # the UI font has no Vietnamese diacritics: show the reason only, it is plain ASCII
+  return Alert(
+    "Voice: command ignored",
+    vc.reason or "ICBM is not active",
+    AlertStatus.normal, AlertSize.mid,
+    Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleLow, 3.)
+
+
 class EventsSP(EventsBase):
   def __init__(self):
     super().__init__()
@@ -255,5 +275,14 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "",
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 2.),
+  },
+
+  # PERMANENT so the driver also hears why a command was ignored while openpilot is not engaged
+  EventNameSP.voiceCruiseSet: {
+    ET.PERMANENT: voice_cruise_set_alert,
+  },
+
+  EventNameSP.voiceCruiseRejected: {
+    ET.PERMANENT: voice_cruise_rejected_alert,
   },
 }

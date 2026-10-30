@@ -133,6 +133,21 @@ class IntelligentCruiseButtonManagement:
   def driver_busy(self) -> bool:
     return self._driver_pressing or self._capture_set_frames > 0
 
+  def apply_voice_command(self, voice: custom.VoiceCommand, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> bool:
+    """A voice command ("Hi Comma, giam ve 50") counts as a driver +/- press that lands straight on the target:
+    it holds until a different speed limit appears, curves may still lower it, and a real button press wins."""
+    if self.CP_SP.pcmCruiseSpeed or not voice.accepted or not CS.cruiseState.enabled:
+      return False
+    if voice.targetSpeed <= 0. or voice.isMetric != self.is_metric:
+      return False
+    ms_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
+    target = max(float(voice.targetSpeed), float(get_minimum_set_speed(self.is_metric)))
+    self.driver_override = True
+    self.override_limit_ms = self.resolved_limit(LP_SP)
+    self.driver_set_ms = target * ms_conv
+    self._capture_set_frames = 0  # nothing to read back from the cluster: the target is known
+    return True
+
   def update_calculations(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> None:
     speed_conv = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
     ms_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS

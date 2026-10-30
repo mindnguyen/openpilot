@@ -357,6 +357,8 @@ struct OnroadEventSP @0xda96579883444c35 {
     e2eChime @23;
     laneChangeRoadEdge @24;
     bigModelReady @25;
+    voiceCruiseSet @26;
+    voiceCruiseRejected @27;
   }
 }
 
@@ -473,7 +475,14 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   }
 }
 
-struct CustomReserved10 @0xcb9fd56c7057593a {
+struct VoiceCommand @0xcb9fd56c7057593a {
+  # "Hi Comma, giam ve 50": published by voiced once per command heard after the wake phrase
+  commandId @0 :UInt32;
+  accepted @1 :Bool;
+  targetSpeed @2 :Float32;  # new set speed in the display unit (km/h when isMetric)
+  isMetric @3 :Bool;
+  text @4 :Text;            # what the recognizer heard
+  reason @5 :Text;          # why it was rejected
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {
