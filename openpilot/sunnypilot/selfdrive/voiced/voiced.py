@@ -69,6 +69,8 @@ class VoiceCruise:
 
   def handle_text(self, text: str, now: float) -> None:
     result = self.session.handle(text, now)
+    # every recognized utterance, so a drive log shows what the model heard when nothing parsed (2026-10-31)
+    cloudlog.info(f"voiced: text {text!r} armed={now <= self.session.armed_until} -> {result}")
     if result is None:
       return
 
