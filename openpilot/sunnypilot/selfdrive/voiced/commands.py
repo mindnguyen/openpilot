@@ -23,13 +23,14 @@ ARM_TIMEOUT = 5.0  # s: "Hi Comma" alone, then the command
 MAX_DELTA = 30     # larger "giảm N" is read as "giảm về N": the recognizer drops "về" (TTS test 2026-10-31)
 MIN_ABSOLUTE = 10  # absolute targets below this are a misparse
 
-# wake phrases, compared without diacritics
-WAKE_PHRASES = [
-  ("hi", "comma"), ("hey", "comma"), ("hai", "comma"),
-  ("hi", "com", "ma"), ("hai", "com", "ma"), ("hay", "com", "ma"), ("hai", "cam", "ma"), ("hai", "co", "ma"),
-  # what vosk-model-small-vn-0.4 actually returned on the comma for "Hai com ma" / "Hi Comma" (2026-10-31)
-  ("hay", "con", "ma"), ("hai", "con", "ma"), ("hi", "con", "ma"), ("hi", "com", "ha"),
-  ("comma", "oi"), ("com", "ma", "oi"),
+# wake phrase, compared without diacritics.  "Hi Comma" said in Vietnamese comes back from vosk-model-small-vn-0.4
+# as any mix of these three slots (streamed on the comma 2026-10-31: "hay còn ma", "hay co ma", "hi con ma",
+# "hi com hạ"), so every combination counts; the third slot keeps everyday "hay còn gọi là ..." out
+WAKE_FIRST = {"hi", "hai", "hay", "hey"}  # "hây" strips to "hay"
+WAKE_SECOND = {"com", "con", "co", "cam"}
+WAKE_THIRD = {"ma", "ha"}
+WAKE_PHRASES = [  # other exact forms
+  ("hi", "comma"), ("hey", "comma"), ("hai", "comma"), ("comma", "oi"), ("com", "ma", "oi"),
 ]
 NOT_IN_MODEL = {"comma"}  # kept for text matching, left out of the recognizer grammar (vosk warns and ignores it)
 WAKE_MAX_OFFSET = 2  # allow a couple of filler words ("ê", "nào") before the wake phrase
@@ -71,6 +72,9 @@ def find_wake(tokens: list[str]) -> int | None:
   """Index of the first token after the wake phrase, or None when there is no wake phrase."""
   plain = [strip_accents(t) for t in tokens]
   for start in range(min(WAKE_MAX_OFFSET + 1, len(plain))):
+    w = plain[start:start + 3]
+    if len(w) == 3 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND and w[2] in WAKE_THIRD:
+      return start + 3
     for phrase in WAKE_PHRASES:
       if tuple(plain[start:start + len(phrase)]) == phrase:
         return start + len(phrase)
@@ -224,7 +228,7 @@ class CommandSession:
 
 def grammar_words() -> list[str]:
   """Vocabulary for a grammar-restricted recognizer: keeps a small model accurate and cheap."""
-  words = {w for phrase in WAKE_PHRASES for w in phrase} - NOT_IN_MODEL
+  words = ({w for phrase in WAKE_PHRASES for w in phrase} | WAKE_FIRST | WAKE_SECOND | WAKE_THIRD) - NOT_IN_MODEL
   words |= {"hây", "ơi"}
   words |= set(DIGITS) | set(UNITS_AFTER_TENS) | {"mười", "mươi", "chục", "trăm", "linh", "lẻ", "rưỡi"}
   words |= VERBS_DOWN | VERBS_UP | VERBS_SET | DIR_DOWN | DIR_UP

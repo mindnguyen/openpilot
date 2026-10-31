@@ -39,6 +39,13 @@ def cmd(text):
   ("hay còn ma tăng lên tám mười", VoiceCommand("set", 80, "up")),
   ("hay còn ma tăng mười", VoiceCommand("delta", 10, None)),
   ("hay còn ma đặt sáu mươi lăm", VoiceCommand("set", 65, None)),
+  # ... and what the real voiced process heard from a continuous stream
+  ("hay con ma giảm hi năm mươi", VoiceCommand("set", 50, "down")),
+  ("hi con ma giảm hi năm mươi ki lô mét trên rưỡi", VoiceCommand("set", 50, "down")),
+  ("hay co ma tăng lên tám mươi", VoiceCommand("set", 80, "up")),
+  ("hay co ma tăng mười", VoiceCommand("delta", 10, None)),
+  ("hay co ma đặt sáu mươi lăm", VoiceCommand("set", 65, None)),
+  ("hai cam hạ giảm về sáu mươi", VoiceCommand("set", 60, "down")),
 ])
 def test_commands(text, expected):
   got = cmd(text)
@@ -63,6 +70,8 @@ def test_rejected(text):
   # what Vosk returned on the comma for ordinary talk (2026-10-31)
   "không hay chỉnh đặt", "đi rưỡi về nhé", "giảm hạ năm mươi trăm số tới hạ set giảm",
   "hay còn gọi là năm mươi",        # "hay còn" is everyday speech; the wake needs "ma" right after it
+  "thêm đi lăm số rưỡi về nhé", "giảm hạ năm mươi linh trăm số tới hạ giảm giảm",
+  "hai con gà giảm về năm mươi",    # "hai con" + something else
 ])
 def test_ignored_without_wake(text):
   assert cmd(text) is None
