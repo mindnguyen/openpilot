@@ -29,7 +29,8 @@ MIN_ABSOLUTE = 10  # absolute targets below this are a misparse
 WAKE_FIRST = {"hi", "hai", "hay", "hey"}  # "hây" strips to "hay"
 WAKE_SECOND = {"com", "con", "co", "cam"}
 WAKE_THIRD = {"ma", "ha"}
-WAKE_SECOND_LOOSE = {"lam", "tram"}  # cabin recording 2026-10-31: "Hi Comma" came back as "hai lăm", "hai trăm" (only at the start)
+# NOT a wake phrase: "hai lăm" / "hai trăm" looked like "Hi Comma" on the cabin recording, but "hai trăm mét" is everyday
+# speech (and navigation prompts): drive 2026-10-31 21:42 it armed the session and "trăm mét" became "set 100 km/h".
 WAKE_PHRASES = [  # other exact forms
   ("hi", "comma"), ("hey", "comma"), ("hai", "comma"), ("comma", "oi"), ("com", "ma", "oi"),
 ]
@@ -91,8 +92,7 @@ def find_wake(tokens: list[str]) -> int | None:
     w = plain[start:start + 3]
     if len(w) == 3 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND and w[2] in WAKE_THIRD:
       return start + 3
-    second = WAKE_SECOND | (WAKE_SECOND_LOOSE if start == 0 else set())
-    if len(w) >= 2 and w[0] in WAKE_FIRST and w[1] in second and command_follows(tokens, start + 2):
+    if len(w) >= 2 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND and command_follows(tokens, start + 2):
       return start + 2
     for phrase in WAKE_PHRASES:
       if tuple(plain[start:start + len(phrase)]) == phrase:
@@ -190,7 +190,10 @@ def parse_command(tokens: list[str], text: str = "") -> VoiceCommand | Rejected:
   num = parse_number(toks, i)
   if num is None:
     return Rejected("no speed heard", text)
-  value = num[0]
+  value, j = num
+  # "trăm mét", "hai trăm mét": a distance, not a speed ("mét giờ" / "mét trên giờ" / "mét một giờ" stay speeds)
+  if j < len(toks) and toks[j] == "mét" and (j + 1 >= len(toks) or toks[j + 1] not in ("giờ", "trên", "một")):
+    return Rejected("distance, not a speed", text)
 
   if direction is not None or verb in (None, "set"):
     if verb in ("up", "down") and direction is not None and verb != direction:

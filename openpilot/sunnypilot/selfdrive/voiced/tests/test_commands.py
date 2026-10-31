@@ -50,7 +50,6 @@ def cmd(text):
   # real cabin speech, 2026-10-31 recording after auto gain: the "ma" syllable is lost
   ("hai com giảm về năm lăm", VoiceCommand("set", 55, "down")),
   ("hay com tăng lên tám mươi", VoiceCommand("set", 80, "up")),
-  ("hai trăm bớt giảm năm lăm mét linh", VoiceCommand("set", 55, "down")),
   ("hai com tốc độ sáu mươi", VoiceCommand("set", 60, None)),
 ])
 def test_commands(text, expected):
@@ -77,7 +76,8 @@ def test_rejected(text):
   "hay còn gọi là năm mươi",        # "hay còn" is everyday speech; the wake needs "ma" right after it
   "thêm đi lăm số rưỡi về nhé", "giảm hạ năm mươi linh trăm số tới hạ giảm giảm",
   "hai con gà giảm về năm mươi",    # "hai con" + something else
-  "hai lăm mét giờ",                # "hai lăm" is only a wake phrase when a command follows
+  "hai lăm về", "hai trăm bớt giảm năm lăm",   # cabin mishearings of "Hi Comma", but "hai trăm mét" is everyday speech
+  "hai trăm mét", "còn hai trăm mét rẽ phải",  # navigation prompt: must never arm the session (21:42 2026-10-31)
   "giảm về hai lăm",                # 25 inside a sentence is a number, not a wake phrase
 ])
 def test_ignored_without_wake(text):
@@ -104,13 +104,25 @@ def test_verb_without_number_keeps_listening():
   assert s.handle("giảm về năm mươi", 31.) is None
 
 
+def test_distance_is_not_a_speed():
+  # drive 2026-10-31 21:42: "hai trăm mét" armed the session and "trăm mét" set 100 km/h at 32 km/h in traffic
+  s = CommandSession()
+  assert s.handle("hai trăm mét", 10.) is None
+  assert s.handle("trăm mét", 12.) is None                      # not armed: ignored
+  assert isinstance(cmd("hai com ma trăm mét"), Rejected)         # armed, but a distance
+  assert isinstance(cmd("hai com ma còn năm mươi mét"), Rejected)
+  assert cmd("hai com ma một trăm") == VoiceCommand("set", 100, None, "hai com ma một trăm")
+  assert cmd("hai com ma giảm về năm lăm mét giờ") == VoiceCommand("set", 55, "down", "hai com ma giảm về năm lăm mét giờ")
+  assert cmd("hai com ma năm mươi ki lô mét một giờ") == VoiceCommand("set", 50, None, "hai com ma năm mươi ki lô mét một giờ")
+
+
 def test_cabin_recording_sequence():
-  # what the recognizer returned for the 2026-10-31 cabin recording (auto gain, grammar)
+  # what the recognizer returned for the 2026-10-31 cabin recording: "hai lăm" no longer arms, so nothing parses
   s = CommandSession()
   assert s.handle("hai lăm về", 46.) is None
-  assert s.handle("giảm về năm lăm mét giờ", 48.) == VoiceCommand("set", 55, "down", "giảm về năm lăm mét giờ")
-  assert s.handle("hay lăm bớt", 51.) is None
-  assert s.handle("giảm năm mét giờ", 53.) == VoiceCommand("delta", -5, None, "giảm năm mét giờ")
+  assert s.handle("giảm về năm lăm mét giờ", 48.) is None
+  assert s.handle("hai com giảm", 51.) is None                 # the "ma" syllable lost: still a wake phrase
+  assert s.handle("giảm về năm lăm mét giờ", 53.) == VoiceCommand("set", 55, "down", "giảm về năm lăm mét giờ")
 
 
 def test_arm_times_out():
