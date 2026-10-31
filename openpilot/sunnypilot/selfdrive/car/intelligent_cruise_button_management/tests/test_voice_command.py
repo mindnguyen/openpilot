@@ -11,9 +11,11 @@ from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.con
 ButtonType = car.CarState.ButtonEvent.Type
 
 
-def car_state(set_kph: float, enabled: bool = True, buttons=()):
+def car_state(set_kph: float, enabled: bool = True, buttons=(), released=()):
+  events = [car.CarState.ButtonEvent(type=b, pressed=True) for b in buttons] + \
+           [car.CarState.ButtonEvent(type=b, pressed=False) for b in released]
   return car.CarState(cruiseState={"enabled": enabled, "available": True, "speedCluster": set_kph * CV.KPH_TO_MS},
-                      buttonEvents=[car.CarState.ButtonEvent(type=b, pressed=True) for b in buttons])
+                      buttonEvents=events)
 
 
 def plan(limit_kph: float | None = None, curve_kph: float | None = None):
@@ -72,13 +74,19 @@ def test_curve_still_lowers_the_voice_target():
   assert icbm.v_target == 70          # back to the voice speed after the curve
 
 
+def press(icbm, button, new_set_kph, lim=None):
+  """A driver tap: press, release, then the cluster shows the new value; ICBM reads it 0.2 s after the release."""
+  icbm.run(car_state(new_set_kph, buttons=[button]), CC, plan(lim), True)
+  icbm.run(car_state(new_set_kph, released=[button]), CC, plan(lim), True)
+  for _ in range(25):
+    icbm.run(car_state(new_set_kph), CC, plan(lim), True)
+
+
 def test_driver_button_wins_over_voice():
   icbm = make_icbm()
   icbm.apply_voice_command(voice(50), car_state(80), plan())
-  icbm.run(car_state(80, buttons=[ButtonType.accelCruise]), CC, plan(), True)
-  for _ in range(25):                 # the press is judged on the cluster value 0.2 s later
-    icbm.run(car_state(81), CC, plan(), True)
-  assert icbm.v_target == 81
+  press(icbm, ButtonType.accelCruise, 81)
+  assert icbm.v_target == 81          # the later press replaces the voice speed
 
 
 def test_disengage_clears_voice_target():
@@ -90,13 +98,28 @@ def test_disengage_clears_voice_target():
   assert icbm.v_target == 80          # re-engaged: follow the sign again, the old voice speed is gone
 
 
-def test_voice_overrides_a_driver_press_still_being_judged():
+def test_voice_ignored_while_a_button_is_pressed():
   icbm = make_icbm()
   icbm.run(car_state(80, buttons=[ButtonType.decelCruise]), CC, plan(), True)
-  assert icbm.apply_voice_command(voice(50), car_state(79), plan())
+  assert not icbm.apply_voice_command(voice(50), car_state(79), plan())   # held
+  icbm.run(car_state(79, released=[ButtonType.decelCruise]), CC, plan(), True)
+  assert not icbm.apply_voice_command(voice(50), car_state(79), plan())   # still being read back
   for _ in range(25):
     icbm.run(car_state(79), CC, plan(), True)
-  assert icbm.v_target == 50          # the earlier "-" press must not replace the voice speed
+  assert icbm.v_target == 79          # the button press is what counts
+  assert icbm.apply_voice_command(voice(50), car_state(79), plan())       # afterwards voice works again
+  icbm.run(car_state(79), CC, plan(), True)
+  assert icbm.v_target == 50
+
+
+def test_voice_then_driver_back_to_the_sign():
+  icbm = make_icbm()
+  icbm.run(car_state(70), CC, plan(limit_kph=70), True)
+  icbm.apply_voice_command(voice(50), car_state(70), plan(limit_kph=70))
+  icbm.run(car_state(70), CC, plan(limit_kph=70), True)
+  assert icbm.v_target == 50
+  press(icbm, ButtonType.accelCruise, 70, lim=70)
+  assert icbm.v_target == 70          # the driver's press back to the sign value is not pulled down to 50
 
 
 def test_rejected_commands():

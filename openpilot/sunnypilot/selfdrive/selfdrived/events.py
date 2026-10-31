@@ -88,7 +88,7 @@ def voice_cruise_rejected_alert(CP: car.CarParams, CS: car.CarState, sm: messagi
   # the UI font has no Vietnamese diacritics: show the reason only, it is plain ASCII
   return Alert(
     "Voice: command ignored",
-    vc.reason or "ICBM is not active",
+    vc.reason or "ICBM is off or a button is pressed",
     AlertStatus.normal, AlertSize.mid,
     Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleLow, 3.)
 
