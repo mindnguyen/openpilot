@@ -8,8 +8,8 @@ Supported after the wake phrase ("hi comma", heard by a Vietnamese model as "hai
   tăng lên / tới / đến N      -> set N, must be higher than now
   đặt / chỉnh / cài N         -> set N
   N                           -> set N
-  giảm / bớt / hạ N           -> N lower than now (N <= MAX_DELTA)
-  tăng / thêm N               -> N higher than now (N <= MAX_DELTA)
+  giảm / bớt / hạ N           -> N lower than now (N <= MAX_DELTA), else read as "giảm về N"
+  tăng / thêm N               -> N higher than now (N <= MAX_DELTA), else read as "tăng lên N"
 The wake phrase may also be said alone; the command then has to follow within ARM_TIMEOUT seconds.
 Numbers can be digits ("50") or words ("năm mươi", "sáu mươi lăm", "một trăm hai", "trăm linh năm").
 """
@@ -20,15 +20,18 @@ import unicodedata
 from dataclasses import dataclass
 
 ARM_TIMEOUT = 5.0  # s: "Hi Comma" alone, then the command
-MAX_DELTA = 30     # relative changes above this are too likely a misheard "giảm về"
+MAX_DELTA = 30     # larger "giảm N" is read as "giảm về N": the recognizer drops "về" (TTS test 2026-10-31)
 MIN_ABSOLUTE = 10  # absolute targets below this are a misparse
 
 # wake phrases, compared without diacritics
 WAKE_PHRASES = [
   ("hi", "comma"), ("hey", "comma"), ("hai", "comma"),
   ("hi", "com", "ma"), ("hai", "com", "ma"), ("hay", "com", "ma"), ("hai", "cam", "ma"), ("hai", "co", "ma"),
+  # what vosk-model-small-vn-0.4 actually returned on the comma for "Hai com ma" / "Hi Comma" (2026-10-31)
+  ("hay", "con", "ma"), ("hai", "con", "ma"), ("hi", "con", "ma"), ("hi", "com", "ha"),
   ("comma", "oi"), ("com", "ma", "oi"),
 ]
+NOT_IN_MODEL = {"comma"}  # kept for text matching, left out of the recognizer grammar (vosk warns and ignores it)
 WAKE_MAX_OFFSET = 2  # allow a couple of filler words ("ê", "nào") before the wake phrase
 
 DIGITS = {
@@ -37,6 +40,8 @@ DIGITS = {
 # special unit forms after "mươi"
 UNITS_AFTER_TENS = {**DIGITS, "mốt": 1, "tư": 4, "lăm": 5, "nhăm": 5}
 UNITS_AFTER_MUOI = {**DIGITS, "lăm": 5, "nhăm": 5}  # after "mười": "mười lăm" = 15
+# "X mươi" = X*10; the recognizer also returns "tám mười" for "tám mươi" (2026-10-31)
+TENS_WORDS = ("mươi", "chục", "mười")
 
 VERBS_DOWN = {"giảm", "bớt", "hạ"}
 VERBS_UP = {"tăng", "thêm"}
@@ -95,7 +100,7 @@ def parse_number(tokens: list[str], i: int) -> tuple[int, int] | None:
     if j < n and tokens[j] == "rưỡi":
       return total + 50, j + 1
     # colloquial "một trăm hai" = 120 (a single digit right after "trăm" counts tens)
-    if j < n and tokens[j] in DIGITS and not (j + 1 < n and tokens[j + 1] in ("mươi", "chục")):
+    if j < n and tokens[j] in DIGITS and not (j + 1 < n and tokens[j + 1] in TENS_WORDS):
       return total + DIGITS[tokens[j]] * 10, j + 1
 
   # tens
@@ -106,7 +111,7 @@ def parse_number(tokens: list[str], i: int) -> tuple[int, int] | None:
       total += UNITS_AFTER_MUOI[tokens[j]]
       j += 1
     return total, j
-  if j + 1 < n and tokens[j] in DIGITS and tokens[j + 1] in ("mươi", "chục"):
+  if j + 1 < n and tokens[j] in DIGITS and tokens[j + 1] in TENS_WORDS:
     total += DIGITS[tokens[j]] * 10
     j += 2
     if j < n and tokens[j] in UNITS_AFTER_TENS:
@@ -169,9 +174,11 @@ def parse_command(tokens: list[str], text: str = "") -> VoiceCommand | Rejected:
     want = direction or (verb if verb in ("up", "down") else None)
     return VoiceCommand("set", value, want, text)
 
-  # verb without direction: relative change
-  if value <= 0 or value > MAX_DELTA:
-    return Rejected("say 'giam ve' or 'tang len' for a target speed", text)
+  # verb without direction: a small number is a relative change, a large one a target whose "về"/"lên" got lost
+  if value <= 0:
+    return Rejected("no speed heard", text)
+  if value > MAX_DELTA:
+    return VoiceCommand("set", value, verb, text)
   return VoiceCommand("delta", value if verb == "up" else -value, None, text)
 
 
@@ -217,8 +224,8 @@ class CommandSession:
 
 def grammar_words() -> list[str]:
   """Vocabulary for a grammar-restricted recognizer: keeps a small model accurate and cheap."""
-  words = {w for phrase in WAKE_PHRASES for w in phrase}
-  words |= {"hây", "cóm", "ơi"}
+  words = {w for phrase in WAKE_PHRASES for w in phrase} - NOT_IN_MODEL
+  words |= {"hây", "ơi"}
   words |= set(DIGITS) | set(UNITS_AFTER_TENS) | {"mười", "mươi", "chục", "trăm", "linh", "lẻ", "rưỡi"}
   words |= VERBS_DOWN | VERBS_UP | VERBS_SET | DIR_DOWN | DIR_UP
   words |= {"tốc", "độ", "ki", "lô", "mét", "cây", "số", "trên", "giờ", "nhé", "đi"}

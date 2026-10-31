@@ -10,6 +10,7 @@ from openpilot.sunnypilot.selfdrive.voiced.commands import (
   ("hai mươi mốt", 21), ("hai mươi tư", 24), ("mười", 10), ("mười lăm", 15), ("năm chục", 50),
   ("một trăm", 100), ("một trăm hai mươi", 120), ("một trăm hai", 120), ("trăm linh năm", 105),
   ("một trăm lẻ năm", 105), ("trăm rưỡi", 150), ("bảy", 7),
+  ("tám mười", 80), ("sáu mười lăm", 65),  # how the recognizer returned "tám mươi" on the comma
 ])
 def test_parse_number(words, value):
   assert parse_number(tokenize(words), 0) == (value, len(tokenize(words)))
@@ -30,6 +31,14 @@ def cmd(text):
   ("hai com ma tăng năm", VoiceCommand("delta", 5, None)),
   ("ê hai com ma giảm về sáu mươi nhé", VoiceCommand("set", 60, "down")),
   ("hey comma tăng lên một trăm", VoiceCommand("set", 100, "up")),
+  ("hai com ma giảm năm mươi", VoiceCommand("set", 50, "down")),   # "về" dropped: 50 is a target, not -50
+  ("hai com ma tăng bốn mươi", VoiceCommand("set", 40, "up")),
+  # exactly what Vosk returned on the comma for the TTS test commands (2026-10-31)
+  ("hay còn ma giảm về năm mươi", VoiceCommand("set", 50, "down")),
+  ("hi com hạ giảm năm mươi ki lô mét trên", VoiceCommand("set", 50, "down")),
+  ("hay còn ma tăng lên tám mười", VoiceCommand("set", 80, "up")),
+  ("hay còn ma tăng mười", VoiceCommand("delta", 10, None)),
+  ("hay còn ma đặt sáu mươi lăm", VoiceCommand("set", 65, None)),
 ])
 def test_commands(text, expected):
   got = cmd(text)
@@ -39,7 +48,6 @@ def test_commands(text, expected):
 
 @pytest.mark.parametrize("text", [
   "hai com ma giảm",                # no number
-  "hai com ma giảm năm mươi",       # 50 lower is ambiguous, ask for "giảm về"
   "hai com ma giảm lên năm mươi",   # conflicting words
   "hai com ma đặt năm",             # 5 km/h is a misparse
 ])
@@ -52,6 +60,9 @@ def test_rejected(text):
   "hai mươi năm rồi",               # normal talk that starts with "hai"
   "radio: tăng lên tám mươi",
   "",
+  # what Vosk returned on the comma for ordinary talk (2026-10-31)
+  "không hay chỉnh đặt", "đi rưỡi về nhé", "giảm hạ năm mươi trăm số tới hạ set giảm",
+  "hay còn gọi là năm mươi",        # "hay còn" is everyday speech; the wake needs "ma" right after it
 ])
 def test_ignored_without_wake(text):
   assert cmd(text) is None
