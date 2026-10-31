@@ -29,6 +29,7 @@ MIN_ABSOLUTE = 10  # absolute targets below this are a misparse
 WAKE_FIRST = {"hi", "hai", "hay", "hey"}  # "hây" strips to "hay"
 WAKE_SECOND = {"com", "con", "co", "cam"}
 WAKE_THIRD = {"ma", "ha"}
+WAKE_SECOND_LOOSE = {"lam", "tram"}  # cabin recording 2026-10-31: "Hi Comma" came back as "hai lăm", "hai trăm" (only at the start)
 WAKE_PHRASES = [  # other exact forms
   ("hi", "comma"), ("hey", "comma"), ("hai", "comma"), ("comma", "oi"), ("com", "ma", "oi"),
 ]
@@ -40,6 +41,7 @@ DIGITS = {
 }
 # special unit forms after "mươi"
 UNITS_AFTER_TENS = {**DIGITS, "mốt": 1, "tư": 4, "lăm": 5, "nhăm": 5}
+UNITS_COLLOQUIAL = {"mốt": 1, "tư": 4, "lăm": 5, "nhăm": 5}  # unit words that only ever follow a tens digit
 UNITS_AFTER_MUOI = {**DIGITS, "lăm": 5, "nhăm": 5}  # after "mười": "mười lăm" = 15
 # "X mươi" = X*10; the recognizer also returns "tám mười" for "tám mươi" (2026-10-31)
 TENS_WORDS = ("mươi", "chục", "mười")
@@ -49,6 +51,7 @@ VERBS_UP = {"tăng", "thêm"}
 VERBS_SET = {"đặt", "chỉnh", "cài", "set", "để"}
 DIR_DOWN = {"về", "xuống", "còn"}
 DIR_UP = {"lên", "tới", "đến"}
+COMMAND_WORDS = VERBS_DOWN | VERBS_UP | VERBS_SET | DIR_DOWN | DIR_UP
 
 # words that can appear around the number and are ignored
 FILLER = {"tốc", "độ", "ga", "xe", "nhé", "nha", "đi", "ạ", "giúp", "cho", "tôi", "mình", "ơi", "ê", "nào", "ki", "lô", "mét",
@@ -68,13 +71,29 @@ def tokenize(text: str) -> list[str]:
   return re.findall(r"\d+|[^\W\d_]+", text)
 
 
+def command_follows(tokens: list[str], i: int) -> bool:
+  """True when tokens[i:] is empty or starts (after fillers) with a verb, a direction or a number."""
+  while i < len(tokens) and tokens[i] in FILLER:
+    i += 1
+  if i >= len(tokens):
+    return True
+  return tokens[i] in COMMAND_WORDS or tokens[i].isdigit() or parse_number(tokens, i) is not None
+
+
 def find_wake(tokens: list[str]) -> int | None:
-  """Index of the first token after the wake phrase, or None when there is no wake phrase."""
+  """Index of the first token after the wake phrase, or None when there is no wake phrase.
+
+  The last syllable ("ma") is often lost in the cabin (2026-10-31 recording: "hai com giảm ...", "hay com"), so two
+  syllables are enough when what follows is a command or nothing; "hai con gà ..." is still ordinary talk.
+  """
   plain = [strip_accents(t) for t in tokens]
   for start in range(min(WAKE_MAX_OFFSET + 1, len(plain))):
     w = plain[start:start + 3]
     if len(w) == 3 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND and w[2] in WAKE_THIRD:
       return start + 3
+    second = WAKE_SECOND | (WAKE_SECOND_LOOSE if start == 0 else set())
+    if len(w) >= 2 and w[0] in WAKE_FIRST and w[1] in second and command_follows(tokens, start + 2):
+      return start + 2
     for phrase in WAKE_PHRASES:
       if tuple(plain[start:start + len(phrase)]) == phrase:
         return start + len(phrase)
@@ -122,6 +141,9 @@ def parse_number(tokens: list[str], i: int) -> tuple[int, int] | None:
       total += UNITS_AFTER_TENS[tokens[j]]
       j += 1
     return total, j
+  # colloquial tens without "mươi": "năm lăm" = 55, "hai mốt" = 21 (cabin recording 2026-10-31)
+  if j + 1 < n and tokens[j] in DIGITS and tokens[j + 1] in UNITS_COLLOQUIAL:
+    return total + DIGITS[tokens[j]] * 10 + UNITS_COLLOQUIAL[tokens[j + 1]], j + 2
   # a single digit
   if j < n and tokens[j] in DIGITS:
     return total + DIGITS[tokens[j]], j + 1
@@ -219,11 +241,13 @@ class CommandSession:
         return None
       start = 0
     rest = tokens[start:]
-    if not [t for t in rest if t not in FILLER]:
+    cmd = parse_command(rest, text) if [t for t in rest if t not in FILLER] else None
+    if cmd is None or (isinstance(cmd, Rejected) and cmd.reason == "no speed heard"):
+      # wake phrase alone, or a verb whose number was not heard ("hai com giảm"): keep listening for the rest
       self.armed_until = now + ARM_TIMEOUT
       return None
     self.armed_until = -1.0
-    return parse_command(rest, text)
+    return cmd
 
 
 def grammar_words() -> list[str]:

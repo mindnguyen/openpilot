@@ -22,6 +22,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.helpers import get_minimum_set_speed
+from openpilot.sunnypilot.selfdrive.voiced.audio import Gain
 from openpilot.sunnypilot.selfdrive.voiced.commands import CommandSession, Rejected, grammar_words, resolve_target
 
 VOICE_DIR = os.getenv("VOICED_DIR", "/data/voice")
@@ -106,12 +107,14 @@ def main():
   pm = messaging.PubMaster(['voiceCommand'])
   voice = VoiceCruise(sm, pm, params.get_bool("IsMetric"))
 
+  gain = Gain()  # the mic is far from the driver: cabin speech is too quiet for the model as recorded
+
   while True:
     # every audio chunk matters, so drain the socket instead of reading only the latest message
     msgs = messaging.drain_sock(audio_sock, wait_for_one=True)
     sm.update(0)
     for m in msgs:
-      if rec.AcceptWaveform(bytes(m.rawAudioData.data)):
+      if rec.AcceptWaveform(gain.apply(bytes(m.rawAudioData.data))):
         text = json.loads(rec.Result()).get("text", "").strip()
         if text:
           voice.handle_text(text, time.monotonic())
