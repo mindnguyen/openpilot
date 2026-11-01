@@ -176,7 +176,14 @@ class IntelligentCruiseButtonManagement:
       return
 
     self.v_target_ms_last = apply_hysteresis(target_ms, self.v_target_ms_last, HYST_GAP * ms_conv)
-    self.v_target = max(round(self.v_target_ms_last * speed_conv), self.v_cruise_min)
+    v_target = round(self.v_target_ms_last * speed_conv)
+    if v_target < self.v_cruise_min:
+      # a limit or driver choice below the car's minimum set speed (resort / parking signs of 10-20 km/h, 01/11/2026
+      # 10:10: camera 10, driver set 21, ICBM pushed it back up to 30): never raise the set speed to the minimum, hold
+      self.v_target_ms_last = CS.cruiseState.speedCluster
+      self.v_target = self.v_cruise_cluster
+      return
+    self.v_target = v_target
 
   def update_state_machine(self) -> custom.IntelligentCruiseButtonManagement.SendButtonState:
     self.pre_active_timer = max(0, self.pre_active_timer - 1)
