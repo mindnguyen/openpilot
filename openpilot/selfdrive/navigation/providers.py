@@ -343,7 +343,8 @@ def here_route_steps(r: dict) -> list[dict]:
       if i + 1 < len(entries):
         _, na, nroad = entries[i + 1]
         ntype, nmod = here_maneuver(na)
-        text = _road_name(nroad.get("nextRoad")) or na.get("instruction", "") or ""
+        # banner text: the road to turn onto; else the first sentence of the instruction ("Rẽ phải sang đường X.")
+        text = _road_name(nroad.get("nextRoad")) or (na.get("instruction", "") or "").split(". ")[0].rstrip(".")
         banner = {"distanceAlongGeometry": step["distance"], "primary": {"text": text, "type": ntype, "modifier": nmod}}
         if na.get("instruction") and text != na.get("instruction"):
           banner["secondary"] = {"text": na["instruction"]}
