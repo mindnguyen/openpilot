@@ -18,6 +18,7 @@ MANEUVER_TRANSITION_THRESHOLD = 10
 REROUTE_COUNTER_MIN = 3
 ROUTE_RESEND_PERIOD = 10  # updates (seconds); a restarted mapsd gets the route within this
 RECOMPUTE_HOLD = 10  # updates (seconds) between route requests
+STATIONARY_SPEED = 1.0  # m/s: parked off the route, do not reroute (every request costs provider quota)
 
 
 def set_banner(instruction, banners, distance_to_maneuver):
@@ -49,6 +50,7 @@ class RouteEngine:
 
     self.last_position = None  # (longitude, latitude)
     self.last_bearing = None
+    self.last_speed = 0.0
 
     self.nav_destination = None
     self.step_idx = None
@@ -72,6 +74,7 @@ class RouteEngine:
     if source is not None:
       gps = self.sm[source]
       self.last_position, self.last_bearing = (gps.longitude, gps.latitude), gps.bearingDeg
+      self.last_speed = float(gps.speed)
     route = self.route
     try:
       self.recompute_route(gps_ok=source is not None)
@@ -95,6 +98,10 @@ class RouteEngine:
 
     # Don't recompute when GPS drifts in tunnels
     if not gps_ok and self.step_idx is not None:
+      return
+    # Parked away from the route (driveway, car park) with the same destination: rerouting every 10 s only burns
+    # provider requests (HERE: 3 reroutes in 20 s while parked, 01/11/2026); the first move triggers it anyway
+    if self.step_idx is not None and new_destination == self.nav_destination and self.last_speed < STATIONARY_SPEED:
       return
 
     self.recompute_hold -= 1
