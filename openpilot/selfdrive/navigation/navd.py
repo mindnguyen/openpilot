@@ -131,8 +131,8 @@ class RouteEngine:
       resp.raise_for_status()
 
       r = resp.json()
-      if len(r.get('routes', [])):
-        steps = providers.normalize_steps(r['routes'][0]['legs'][0]['steps'], near=self.last_position)
+      steps = providers.route_steps(self.provider, r, near=self.last_position)
+      if steps:
         self.route = steps
         self.route_geometry = [np.array(step['geometry']['coordinates'], dtype=np.float64).reshape((-1, 2)) for step in self.route]
         self.step_idx = 0
@@ -166,6 +166,7 @@ class RouteEngine:
 
     # Current instruction
     msg.navInstruction.maneuverDistance = distance_to_maneuver_along_geometry
+    msg.navInstruction.speedLimit = providers.limit_at(step, along_geometry)  # HERE spans; 0 for other providers
     set_banner(msg.navInstruction, banner_step['bannerInstructions'], distance_to_maneuver_along_geometry)
 
     # Total remaining distance and time: the rest of this step, then every step after it

@@ -130,7 +130,22 @@ class SpeedLimitResolver:
     speed_limit = map_data.speedLimit if map_data.speedLimitValid else 0.
     next_speed_limit = map_data.speedLimitAhead if map_data.speedLimitAheadValid else 0.
 
+    # while a route is active the route provider's limit (HERE spans, via navd) is the road the car is on: it
+    # replaces the OSM value, which is often missing or stale in Vietnam
+    nav_limit = self._nav_speed_limit(sm)
+    if nav_limit > 0.:
+      speed_limit, next_speed_limit = nav_limit, 0.
+
     self._calculate_map_data_limits(sm, speed_limit, next_speed_limit)
+
+  @staticmethod
+  def _nav_speed_limit(sm: messaging.SubMaster) -> float:
+    try:
+      if sm.valid['navInstruction'] and sm.alive['navInstruction']:
+        return float(sm['navInstruction'].speedLimit)
+    except (KeyError, AttributeError):
+      pass
+    return 0.
 
   def _calculate_map_data_limits(self, sm: messaging.SubMaster, speed_limit: float, next_speed_limit: float) -> None:
     gps_data = sm[self._gps_location_service]
