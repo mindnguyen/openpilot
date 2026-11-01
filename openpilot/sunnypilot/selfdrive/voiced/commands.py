@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 ARM_TIMEOUT = 5.0  # s: "Hi Comma" alone, then the command
 MAX_DELTA = 30     # larger "giảm N" is read as "giảm về N": the recognizer drops "về" (TTS test 2026-10-31)
-MIN_ABSOLUTE = 10  # absolute targets below this are a misparse
+MIN_ABSOLUTE = 20  # absolute targets below this are a misparse (a lone "mười" is usually a lost "...mươi", 01/11/2026)
 
 # wake phrase, compared without diacritics.  "Hi Comma" said in Vietnamese comes back from vosk-model-small-vn-0.4
 # as any mix of these three slots (streamed on the comma 2026-10-31: "hay còn ma", "hay co ma", "hi con ma",
@@ -33,6 +33,9 @@ WAKE_THIRD = {"ma", "ha"}
 # These count as the wake phrase only at the start AND only when a command verb/direction follows at once, so
 # "hai trăm mét" (everyday speech, navigation prompts; it armed "trăm mét" -> set 100 on 31/10 21:42) never arms.
 WAKE_SECOND_LOOSE = {"lam", "tram"}
+# drive 01/11/2026 10:30: one of the two syllables was lost every time ("com đến ...", "hây lên ..."), so at the very
+# start a single "com" or "hi/hai/hay/hây" is enough when a command verb or direction follows at once (user's choice)
+WAKE_SINGLE = WAKE_FIRST | {"com"}
 WAKE_PHRASES = [  # other exact forms
   ("hi", "comma"), ("hey", "comma"), ("hai", "comma"), ("comma", "oi"), ("com", "ma", "oi"),
 ]
@@ -55,6 +58,7 @@ VERBS_SET = {"đặt", "chỉnh", "cài", "set", "để"}
 DIR_DOWN = {"về", "xuống", "còn"}
 DIR_UP = {"lên", "tới", "đến"}
 COMMAND_WORDS = VERBS_DOWN | VERBS_UP | VERBS_SET | DIR_DOWN | DIR_UP
+WAKE_SINGLE_VERBS = VERBS_DOWN | VERBS_UP | VERBS_SET | {"về", "lên", "xuống"}  # not "còn"/"đến"/"tới": "hay còn gọi là" is everyday talk
 
 # words that can appear around the number and are ignored
 FILLER = {"tốc", "độ", "ga", "xe", "nhé", "nha", "đi", "ạ", "giúp", "cho", "tôi", "mình", "ơi", "ê", "nào", "ki", "lô", "mét",
@@ -97,14 +101,24 @@ def find_wake(tokens: list[str]) -> int | None:
     w = plain[start:start + 3]
     if len(w) == 3 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND and w[2] in WAKE_THIRD:
       return start + 3
+    for phrase in WAKE_PHRASES:
+      if tuple(plain[start:start + len(phrase)]) == phrase:
+        return start + len(phrase)
     if len(w) >= 2 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND and command_follows(tokens, start + 2):
       return start + 2
     if start == 0 and len(w) >= 2 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND_LOOSE and command_follows(tokens, 2, verb_only=True):
       return 2
-    for phrase in WAKE_PHRASES:
-      if tuple(plain[start:start + len(phrase)]) == phrase:
-        return start + len(phrase)
+  # one syllable at the very start ("com giảm ...", "hây lên ...") followed at once by a strong command word
+  if len(plain) >= 2 and plain[0] in WAKE_SINGLE and _strong_verb_follows(tokens, 1):
+    return 1
   return None
+
+
+def _strong_verb_follows(tokens: list[str], i: int) -> bool:
+  while i < len(tokens) and tokens[i] in FILLER:
+    i += 1
+  return i < len(tokens) and tokens[i] in WAKE_SINGLE_VERBS
+
 
 
 def parse_number(tokens: list[str], i: int) -> tuple[int, int] | None:

@@ -127,6 +127,31 @@ def test_loose_wake_with_verb(text, expected):
   assert isinstance(got, VoiceCommand) and (got.kind, got.value, got.direction) == (expected.kind, expected.value, expected.direction)
 
 
+@pytest.mark.parametrize("text, expected", [
+  # drive 2026-11-01 10:30: only one syllable of "Hi Comma" survives; a verb right after it is enough (user's choice)
+  ("com giảm về năm mươi", VoiceCommand("set", 50, "down")),
+  ("hây lên tám mươi", VoiceCommand("set", 80, "up")),
+  ("hai đặt sáu mươi", VoiceCommand("set", 60, None)),
+  ("com tốc độ giảm mười", VoiceCommand("delta", -10, None)),
+])
+def test_single_syllable_wake(text, expected):
+  got = cmd(text)
+  assert isinstance(got, VoiceCommand) and (got.kind, got.value, got.direction) == (expected.kind, expected.value, expected.direction)
+
+
+@pytest.mark.parametrize("text", [
+  "com", "hây", "com mười", "hay lắm", "hai mươi năm rồi", "com giờ mười",   # no verb right after the syllable
+  "lên com giờ mười",                                                        # not at the start
+])
+def test_single_syllable_needs_a_verb(text):
+  assert cmd(text) is None
+
+
+def test_lone_muoi_is_too_low():
+  assert isinstance(cmd("hây lên mười"), Rejected)                # 01/11 10:32: "mười" alone = a lost "...mươi"
+  assert cmd("com đến đến độ mười") is None                     # "đến" alone is not a strong enough verb for one syllable
+
+
 def test_loose_wake_without_number_keeps_listening():
   s = CommandSession()
   assert s.handle("hây lăm lên giảm đến lăm", 10.) is None    # 01/11 10:10: wake heard, no number: wait for it
