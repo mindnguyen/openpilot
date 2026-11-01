@@ -29,8 +29,10 @@ MIN_ABSOLUTE = 10  # absolute targets below this are a misparse
 WAKE_FIRST = {"hi", "hai", "hay", "hey"}  # "hây" strips to "hay"
 WAKE_SECOND = {"com", "con", "co", "cam"}
 WAKE_THIRD = {"ma", "ha"}
-# NOT a wake phrase: "hai lăm" / "hai trăm" looked like "Hi Comma" on the cabin recording, but "hai trăm mét" is everyday
-# speech (and navigation prompts): drive 2026-10-31 21:42 it armed the session and "trăm mét" became "set 100 km/h".
+# "Hi Comma" in the cabin keeps coming back as "hây lăm" / "hai trăm" (recording 31/10, drive 01/11 10:07 and 10:10).
+# These count as the wake phrase only at the start AND only when a command verb/direction follows at once, so
+# "hai trăm mét" (everyday speech, navigation prompts; it armed "trăm mét" -> set 100 on 31/10 21:42) never arms.
+WAKE_SECOND_LOOSE = {"lam", "tram"}
 WAKE_PHRASES = [  # other exact forms
   ("hi", "comma"), ("hey", "comma"), ("hai", "comma"), ("comma", "oi"), ("com", "ma", "oi"),
 ]
@@ -72,13 +74,16 @@ def tokenize(text: str) -> list[str]:
   return re.findall(r"\d+|[^\W\d_]+", text)
 
 
-def command_follows(tokens: list[str], i: int) -> bool:
-  """True when tokens[i:] is empty or starts (after fillers) with a verb, a direction or a number."""
+def command_follows(tokens: list[str], i: int, verb_only: bool = False) -> bool:
+  """True when tokens[i:] is empty or starts (after fillers) with a verb, a direction or a number.
+  verb_only: a verb or direction word must follow (no number, not the end of the utterance)."""
   while i < len(tokens) and tokens[i] in FILLER:
     i += 1
   if i >= len(tokens):
+    return not verb_only
+  if tokens[i] in COMMAND_WORDS:
     return True
-  return tokens[i] in COMMAND_WORDS or tokens[i].isdigit() or parse_number(tokens, i) is not None
+  return not verb_only and (tokens[i].isdigit() or parse_number(tokens, i) is not None)
 
 
 def find_wake(tokens: list[str]) -> int | None:
@@ -94,6 +99,8 @@ def find_wake(tokens: list[str]) -> int | None:
       return start + 3
     if len(w) >= 2 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND and command_follows(tokens, start + 2):
       return start + 2
+    if start == 0 and len(w) >= 2 and w[0] in WAKE_FIRST and w[1] in WAKE_SECOND_LOOSE and command_follows(tokens, 2, verb_only=True):
+      return 2
     for phrase in WAKE_PHRASES:
       if tuple(plain[start:start + len(phrase)]) == phrase:
         return start + len(phrase)

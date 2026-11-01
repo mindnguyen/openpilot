@@ -76,8 +76,8 @@ def test_rejected(text):
   "hay còn gọi là năm mươi",        # "hay còn" is everyday speech; the wake needs "ma" right after it
   "thêm đi lăm số rưỡi về nhé", "giảm hạ năm mươi linh trăm số tới hạ giảm giảm",
   "hai con gà giảm về năm mươi",    # "hai con" + something else
-  "hai lăm về", "hai trăm bớt giảm năm lăm",   # cabin mishearings of "Hi Comma", but "hai trăm mét" is everyday speech
   "hai trăm mét", "còn hai trăm mét rẽ phải",  # navigation prompt: must never arm the session (21:42 2026-10-31)
+  "hai lăm", "hai lăm mét", "hây lăm năm mươi",  # "hai lăm"/"hai trăm" wake only with a verb right after
   "giảm về hai lăm",                # 25 inside a sentence is a number, not a wake phrase
 ])
 def test_ignored_without_wake(text):
@@ -116,11 +116,28 @@ def test_distance_is_not_a_speed():
   assert cmd("hai com ma năm mươi ki lô mét một giờ") == VoiceCommand("set", 50, None, "hai com ma năm mươi ki lô mét một giờ")
 
 
+@pytest.mark.parametrize("text, expected", [
+  # drive 2026-11-01: "Hi Comma lên ... bốn mươi" came back as this (gain +14 dB, grammar)
+  ("hây lăm lên mốt linh bốn mười", VoiceCommand("set", 40, "up")),
+  ("hai lăm về năm lăm", VoiceCommand("set", 55, "down")),
+  ("hai trăm bớt giảm năm lăm", VoiceCommand("set", 55, "down")),
+])
+def test_loose_wake_with_verb(text, expected):
+  got = cmd(text)
+  assert isinstance(got, VoiceCommand) and (got.kind, got.value, got.direction) == (expected.kind, expected.value, expected.direction)
+
+
+def test_loose_wake_without_number_keeps_listening():
+  s = CommandSession()
+  assert s.handle("hây lăm lên giảm đến lăm", 10.) is None    # 01/11 10:10: wake heard, no number: wait for it
+  assert s.handle("năm mươi", 12.) == VoiceCommand("set", 50, None, "năm mươi")
+
+
 def test_cabin_recording_sequence():
   # what the recognizer returned for the 2026-10-31 cabin recording: "hai lăm" no longer arms, so nothing parses
   s = CommandSession()
-  assert s.handle("hai lăm về", 46.) is None
-  assert s.handle("giảm về năm lăm mét giờ", 48.) is None
+  assert s.handle("hai lăm về", 46.) is None                    # wake + direction, no number yet: armed
+  assert s.handle("giảm về năm lăm mét giờ", 48.) == VoiceCommand("set", 55, "down", "giảm về năm lăm mét giờ")
   assert s.handle("hai com giảm", 51.) is None                 # the "ma" syllable lost: still a wake phrase
   assert s.handle("giảm về năm lăm mét giờ", 53.) == VoiceCommand("set", 55, "down", "giảm về năm lăm mét giờ")
 
