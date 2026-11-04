@@ -15,6 +15,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD, get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.external_limit import ExternalLimit
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
@@ -39,6 +40,7 @@ class SpeedLimitResolver:
 
     self._gps_location_service = get_gps_location_service(self.params)
     self.limit_solutions = {}  # Store for speed limit solutions from different sources
+    self._external = ExternalLimit()  # signs read by the HMI (VietMap Live widget) via commaview
     self.distance_solutions = {}  # Store for distance to current speed limit start for different sources
 
     self.policy = self.params.get("SpeedLimitPolicy", return_default=True)
@@ -120,6 +122,17 @@ class SpeedLimitResolver:
     self._process_map_data(sm)
 
   def _process_map_data(self, sm: messaging.SubMaster) -> None:
+    # traffic signs read by the HMI (VietMap Live widget) and pushed through commaview: the most specific and the
+    # freshest source, used as the "map" solution while the record is fresh; needs no GPS fix
+    try:
+      ext = self._external.read(v_ego=self.v_ego)
+    except Exception:
+      ext = None
+    if ext is not None:
+      ext_limit, ext_next, ext_dist = ext
+      self._calculate_map_data_limits(sm, ext_limit, ext_next, ext_dist)
+      return
+
     gps_data = sm[self._gps_location_service]
     map_data = sm['liveMapDataSP']
 
@@ -147,12 +160,15 @@ class SpeedLimitResolver:
       pass
     return 0.
 
-  def _calculate_map_data_limits(self, sm: messaging.SubMaster, speed_limit: float, next_speed_limit: float) -> None:
-    gps_data = sm[self._gps_location_service]
-    map_data = sm['liveMapDataSP']
-
-    distance_since_fix = self.v_ego * (time.monotonic() - gps_data.unixTimestampMillis * 1e-3)
-    distance_to_speed_limit_ahead = max(0., map_data.speedLimitAheadDistance - distance_since_fix)
+  def _calculate_map_data_limits(self, sm: messaging.SubMaster, speed_limit: float, next_speed_limit: float,
+                                 next_distance: float | None = None) -> None:
+    if next_distance is None:
+      gps_data = sm[self._gps_location_service]
+      map_data = sm['liveMapDataSP']
+      distance_since_fix = self.v_ego * (time.monotonic() - gps_data.unixTimestampMillis * 1e-3)
+      distance_to_speed_limit_ahead = max(0., map_data.speedLimitAheadDistance - distance_since_fix)
+    else:
+      distance_to_speed_limit_ahead = max(0., next_distance)
 
     self.limit_solutions[SpeedLimitSource.map] = speed_limit
     self.distance_solutions[SpeedLimitSource.map] = 0.
