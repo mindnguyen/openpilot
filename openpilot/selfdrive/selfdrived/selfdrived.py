@@ -686,7 +686,7 @@ class SelfdriveD:
   def _change_personality(self) -> tuple[int, int]:
     with self.personality_lock:
       old_personality = self.personality
-      self.personality = (self.personality - 1) % 3
+      self.personality = (self.personality - 1) % len(LONGITUDINAL_PERSONALITY_MAP)
       self.personality_write_pending = self.personality
       self.personality_generation += 1
       self.personality_write_event.set()

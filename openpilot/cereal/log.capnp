@@ -149,6 +149,8 @@ enum LongitudinalPersonality {
   aggressive @0;
   standard @1;
   relaxed @2;
+  far @3;       # two extra following distances beyond relaxed: five bars, like the car's own ACC
+  farthest @4;
 }
 
 struct InitData {

@@ -610,6 +610,14 @@
                 {
                   "value": 2,
                   "label": "Relaxed"
+                },
+                {
+                  "value": 3,
+                  "label": "Far"
+                },
+                {
+                  "value": 4,
+                  "label": "Farthest"
                 }
               ],
               "enablement": [
