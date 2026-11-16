@@ -105,7 +105,7 @@ class SelfdriveD:
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
     self.car_state_sock = messaging.sub_sock('carState', timeout=20)
 
-    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + ['modelDataV2SP', 'longitudinalPlanSP', 'voiceCommand']
+    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + ['modelDataV2SP', 'longitudinalPlanSP']
     if not Params().get_bool("EnableCurvatureD"):
       ignore += ['lateralCurvatureParameters']
     if SIMULATION:
@@ -117,7 +117,7 @@ class SelfdriveD:
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'deviceMotion', 'lateralDelay',
                                    'managerState', 'vehicleParameters', 'radarState', 'lateralTorqueParameters', 'lateralCurvatureParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark',
-                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP', 'carStateIC', 'voiceCommand'] + \
+                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP', 'carStateIC'] + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
                                   ignore_valid=ignore, frequency=int(1/DT_CTRL))
@@ -164,8 +164,7 @@ class SelfdriveD:
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
-    # voiced is a convenience: if it dies, voice commands stop, but driving must never be disengaged for it
-    self.ignored_processes = {'mapd', 'voiced', }
+    self.ignored_processes = {'mapd', }
 
     # Determine startup event
     is_remote = build_metadata.openpilot.comma_remote or build_metadata.openpilot.sunnypilot_remote
@@ -539,13 +538,6 @@ class SelfdriveD:
       if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
         self._change_personality()
         self.events.add(EventName.personalityChanged)
-
-    # "Hi Comma, giam ve 50" (voiced): ICBM takes it like a driver +/- press
-    if self.sm.updated['voiceCommand']:
-      if self.icbm.apply_voice_command(self.sm['voiceCommand'], CS, self.sm['longitudinalPlanSP']):
-        self.events_sp.add(custom.OnroadEventSP.EventName.voiceCruiseSet)
-      else:
-        self.events_sp.add(custom.OnroadEventSP.EventName.voiceCruiseRejected)
 
     self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric)
 

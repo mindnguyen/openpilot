@@ -59,9 +59,6 @@ def qcomgps(started: bool, params: Params, CP: car.CarParams) -> bool:
 def always_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   return True
 
-def voice_cruise(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return started and not CP.notCar and params.get_bool("VoiceCruiseControl")
-
 def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started
 
@@ -128,7 +125,6 @@ procs = [
   PythonProcess("proclogd", "openpilot.system.proclogd", only_onroad, enabled=platform.system() != "Darwin"),
   PythonProcess("journald", "openpilot.system.journald", only_onroad, platform.system() != "Darwin"),
   PythonProcess("micd", "openpilot.system.micd", iscar),
-  PythonProcess("voiced", "openpilot.sunnypilot.selfdrive.voiced.voiced", voice_cruise),
   PythonProcess("timed", "openpilot.system.timed", always_run, enabled=not PC),
 
   PythonProcess("modeld", "openpilot.selfdrive.modeld.modeld", and_(only_onroad, is_stock_model)),
