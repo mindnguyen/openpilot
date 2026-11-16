@@ -21,6 +21,11 @@ SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 ALL_SOURCES = tuple(SpeedLimitSource.schema.enumerants.values())
 
+# Teramont X fork: the "map" source is the VietMap Live relay only (signs read by the box app and pushed through
+# commaview).  When that record is missing or stale there is no map limit at all: the OSM database and the route
+# provider's limit are not used as a fallback.  Set to False to get the fallback back.
+MAP_SOURCE_EXTERNAL_ONLY = True
+
 
 class SpeedLimitResolver:
   limit_solutions: dict[custom.LongitudinalPlanSP.SpeedLimit.Source, float]
@@ -131,6 +136,9 @@ class SpeedLimitResolver:
     if ext is not None:
       ext_limit, ext_next, ext_dist = ext
       self._calculate_map_data_limits(sm, ext_limit, ext_next, ext_dist)
+      return
+
+    if MAP_SOURCE_EXTERNAL_ONLY:
       return
 
     gps_data = sm[self._gps_location_service]
