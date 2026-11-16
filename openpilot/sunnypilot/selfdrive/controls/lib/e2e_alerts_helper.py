@@ -16,6 +16,21 @@ GREEN_LIGHT_X_THRESHOLD = 30
 LEAD_DEPART_DIST_THRESHOLD = 1.0
 TRIGGER_TIMER_THRESHOLD = 0.3
 
+# Teramont X fork: green-light go.  With openpilot longitudinal the car holds at a stop line until the model's
+# short-horizon plan says go, which lags the green light when nothing is in front.  When the model's path already
+# reaches far ahead while we are still holding, request a short gentle start (the same effect as a tap on the
+# gas) and then hand back to the model.  Only the model's stop is overridden: the lead and set-speed limits in
+# the planner still apply.  Off together with the GreenLightAlert toggle.
+GREEN_LIGHT_GO = True
+GREEN_LIGHT_GO_X_THRESHOLD = 30.     # m, model path length at the horizon that counts as "wants to drive"
+GREEN_LIGHT_GO_TRIGGER_TIME = 0.5    # s the path has to stay that long
+GREEN_LIGHT_GO_MIN_STAND_TIME = 2.0  # s at standstill before a go is considered
+GREEN_LIGHT_GO_MIN_LEAD_DIST = 6.0   # m, a lead closer than this blocks the go (lead following handles that case)
+GREEN_LIGHT_GO_ACCEL = 0.6           # m/s^2 requested while the go is active
+GREEN_LIGHT_GO_MAX_TIME = 2.0        # s
+GREEN_LIGHT_GO_END_SPEED = 1.0       # m/s, rolling: the model takes over again
+GREEN_LIGHT_GO_ABORT_X = 15.         # m, the go is dropped if the model path shrinks below this again
+
 
 class E2EStates:
   INACTIVE = 0
@@ -50,6 +65,15 @@ class E2EAlertsHelper:
     self.lead_depart_confirmed_lead = False
     self.lead_depart_armed = False
 
+    # green-light go (see GREEN_LIGHT_GO)
+    self.op_long = False          # set by the planner: only meaningful when openpilot controls gas and brake
+    self.green_light_go = False
+    self.lead_d_rel = 0.
+    self.go_stand_frames = 0
+    self.go_path_frames = 0
+    self.go_frames_left = 0
+    self.go_consumed = False
+
   def _read_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.green_light_alert_enabled = self._params.get_bool("GreenLightAlert")
@@ -63,6 +87,7 @@ class E2EAlertsHelper:
     max_idx = len(model_x) - 1
     self.has_lead = sm['radarState'].leadOne.present
     lead_dRel = sm['radarState'].leadOne.dRel
+    self.lead_d_rel = lead_dRel
 
     standstill = CS.standstill
     moving = not standstill and CS.vEgo > 0.1
@@ -122,6 +147,39 @@ class E2EAlertsHelper:
 
     return green_light_trigger, lead_depart_trigger
 
+  def update_green_light_go(self, sm: messaging.SubMaster, events_sp: EventsSP) -> None:
+    CS = sm['carState']
+    CC = sm['carControl']
+    model_x = sm['modelV2'].position.x
+    path_len = model_x[len(model_x) - 1] if len(model_x) else 0.
+
+    engaged = self.op_long and CC.enabled and CC.longActive
+    holding = engaged and CS.standstill and not CS.gasPressed and not CS.brakePressed
+    rolling = not CS.standstill and CS.vEgo > GREEN_LIGHT_GO_END_SPEED
+
+    if holding:
+      self.go_stand_frames += 1
+      self.go_path_frames = self.go_path_frames + 1 if path_len > GREEN_LIGHT_GO_X_THRESHOLD else 0
+      lead_close = self.has_lead and self.lead_d_rel < GREEN_LIGHT_GO_MIN_LEAD_DIST
+      if (GREEN_LIGHT_GO and self.green_light_alert_enabled and not self.go_consumed and not lead_close and
+          self.go_stand_frames * DT_MDL >= GREEN_LIGHT_GO_MIN_STAND_TIME and
+          self.go_path_frames * DT_MDL >= GREEN_LIGHT_GO_TRIGGER_TIME):
+        self.go_consumed = True   # one go per stop
+        self.go_frames_left = int(GREEN_LIGHT_GO_MAX_TIME / DT_MDL)
+        events_sp.add(custom.OnroadEventSP.EventName.e2eChime)
+    else:
+      self.go_stand_frames = 0
+      self.go_path_frames = 0
+      if rolling:
+        self.go_consumed = False
+
+    # the go ends when it has done its job (rolling), when the driver brakes, when openpilot is no longer driving,
+    # or when the model takes back its long path (a false trigger)
+    if not engaged or CS.brakePressed or rolling or path_len < GREEN_LIGHT_GO_ABORT_X:
+      self.go_frames_left = 0
+    self.green_light_go = self.go_frames_left > 0
+    self.go_frames_left = max(0, self.go_frames_left - 1)
+
   @staticmethod
   def update_state_machine(state: int, enabled: bool, allowed: bool, triggered: bool) -> tuple[int, bool]:
     if state != E2EStates.INACTIVE:
@@ -166,5 +224,7 @@ class E2EAlertsHelper:
 
     if self.green_light_alert or self.lead_depart_alert:
       events_sp.add(custom.OnroadEventSP.EventName.e2eChime)
+
+    self.update_green_light_go(sm, events_sp)
 
     self.frame += 1
