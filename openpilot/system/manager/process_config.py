@@ -1,6 +1,7 @@
 import os
 import operator
 import platform
+import time
 
 from opendbc.car.structs import car
 from openpilot.cereal import custom
@@ -74,6 +75,13 @@ def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def livestream(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("IsLiveStreaming")
 
+def commacloud_live(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # the commacloud agent refreshes this flag every 2 s while the owner watches the live camera through their own server
+  try:
+    return 0 <= time.time() - os.path.getmtime("/dev/shm/commacloud_live") < 10  # noqa: TID251
+  except OSError:
+    return False
+
 def use_copyparty(started, params, CP: car.CarParams) -> bool:
   return bool(params.get_bool("EnableCopyparty"))
 
@@ -117,10 +125,10 @@ procs = [
 
   NativeProcess("loggerd", "openpilot/system/loggerd", ["./loggerd"], logging),
   NativeProcess("encoderd", "openpilot/system/loggerd", ["./encoderd"], only_onroad),
-  NativeProcess("stream_encoderd", "openpilot/system/loggerd", ["./encoderd", "--stream"], or_(livestream, notcar)),
+  NativeProcess("stream_encoderd", "openpilot/system/loggerd", ["./encoderd", "--stream"], or_(or_(livestream, notcar), commacloud_live)),
   PythonProcess("logmessaged", "openpilot.system.logmessaged", always_run),
 
-  NativeProcess("camerad", "openpilot/system/camerad", ["./camerad"], or_(driverview, livestream), enabled=not WEBCAM),
+  NativeProcess("camerad", "openpilot/system/camerad", ["./camerad"], or_(or_(driverview, livestream), commacloud_live), enabled=not WEBCAM),
   PythonProcess("webcamerad", "openpilot.system.camerad.webcam.camerad", driverview, enabled=WEBCAM),
   PythonProcess("proclogd", "openpilot.system.proclogd", only_onroad, enabled=platform.system() != "Darwin"),
   PythonProcess("journald", "openpilot.system.journald", only_onroad, platform.system() != "Darwin"),
@@ -190,6 +198,9 @@ procs += [
   # commaview: LAN dashboard for the phone (/data/commaview, port 8099). Runs on and off road; skipped when not installed.
   NativeProcess("commaview", "/data/commaview", ["/usr/local/venv/bin/python", "/data/commaview/commaview.py"], always_run,
                 enabled=os.path.exists("/data/commaview/commaview.py")),
+  # commacloud: position, live camera and drive upload to the owner's own server (/data/commacloud). Skipped when not installed.
+  NativeProcess("commacloud", "/data/commacloud", ["/usr/local/venv/bin/python", "/data/commacloud/agent.py"], always_run,
+                enabled=os.path.exists("/data/commacloud/agent.py")),
 
   # locationd
   NativeProcess("locationd_llk", "openpilot/sunnypilot/selfdrive/locationd", ["./locationd"], only_onroad),
