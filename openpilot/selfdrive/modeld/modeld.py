@@ -40,7 +40,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, 
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.helpers import MODELS_DIR, BigModelRetry, chestnut_present, chestnut_compiled, modeld_pkl_path, load_oob, wait_for_chestnut
+from openpilot.selfdrive.modeld.helpers import MODELS_DIR, chestnut_present, chestnut_compiled, modeld_pkl_path, load_oob, wait_for_chestnut
 from openpilot.sunnypilot.livedelay.helpers import LateralDelayCache
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
@@ -313,7 +313,6 @@ def main(demo=False):
   publish_state = PublishState()
   params = Params()
   chestnut_state = ChestnutGpuState(pm, model.chestnut) if CHESTNUT else None
-  big_retry = BigModelRetry(params, enabled=CHESTNUT and not demo)
 
   # setup filter to track dropped frames
   frame_dropped_filter = FirstOrderFilter(0., 10., 1. / ModelConstants.MODEL_RUN_FREQ)
@@ -377,11 +376,6 @@ def main(demo=False):
       meta_extra = meta_main
 
     sm.update(0)
-    if big_retry.pending:
-      cs, cc = sm["carState"], sm["carControl"]
-      parked = sm.alive["carState"] and cs.gearShifter in (car.CarState.GearShifter.park, car.CarState.GearShifter.neutral)
-      if big_retry.update(time.monotonic(), parked, cs.vEgo, cc.enabled or cc.latActive or cc.longActive, sm["deviceState"].chestnutPresent):
-        cloudlog.error("big model failed while parked, cycling onroad to retry")
     desire = DH.desire
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
@@ -440,7 +434,6 @@ def main(demo=False):
       params.put_bool("ChestnutActive", False)
       assert small_model is not None
       model = small_model
-      big_retry.failed(time.monotonic())
       if chestnut_state is not None:
         chestnut_state.big = False
       run_count = 0

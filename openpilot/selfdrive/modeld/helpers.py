@@ -38,47 +38,6 @@ def wait_for_chestnut(timeout: float = 10.) -> None:
       raise TimeoutError("chestnut did not enumerate")
     time.sleep(0.1)
 
-BIG_MODEL_RETRY_DELAY = 1.  # s after the failure: the engine runs by then, and the new modeld touches the chestnut only ~10 s later
-
-
-class BigModelRetry:
-  """Bring the big model back after it died while running.
-
-  The usual cause is the starter: cranking the engine after the model has loaded pulls the 12V down, the chestnut
-  drops off for a moment and the model falls back to small until the next ignition. A failed load is already retried
-  once with an onroad cycle (ChestnutRetry); this does the same for a failure after the load, but only while the cycle
-  cannot disturb driving: selector in P or N, car standing, openpilot not engaged, chestnut on USB. That is the state of
-  a normal car start, so the cycle is no more than a second start-up. Anything else (an engine restart at a traffic
-  light, say) keeps the small model and waits until the car is parked."""
-
-  def __init__(self, params, enabled: bool = True):
-    self.params = params
-    self.enabled = enabled
-    self.failed_t: float | None = None
-
-  @property
-  def pending(self) -> bool:
-    return self.failed_t is not None
-
-  def failed(self, now: float) -> None:
-    # one cycle per ignition, shared with the retry of a failed load
-    if self.enabled and not self.params.get_bool("ChestnutRetry"):
-      self.failed_t = now
-
-  def update(self, now: float, parked: bool, v_ego: float, engaged: bool, chestnut_usb: bool) -> bool:
-    """True when the onroad cycle was requested. Call once per frame while pending."""
-    if self.failed_t is None or now - self.failed_t < BIG_MODEL_RETRY_DELAY:
-      return False
-    if not parked or v_ego > 0.1 or engaged or not chestnut_usb:
-      return False
-    self.failed_t = None
-    if self.params.get_bool("ChestnutRetry"):   # the load retry took the one cycle in the meantime
-      return False
-    self.params.put_bool("ChestnutRetry", True)
-    self.params.put_bool("OnroadCycleRequested", True)
-    return True
-
-
 def chestnut_compiled() -> bool:
   path = modeld_pkl_path(chestnut=True)
   return path.is_file() and all(
