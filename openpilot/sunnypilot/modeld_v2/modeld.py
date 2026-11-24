@@ -18,7 +18,7 @@ from setproctitle import setproctitle
 
 import openpilot.cereal.messaging as messaging
 from openpilot.common.hardware import COMMA_HARDWARE
-from openpilot.selfdrive.modeld.helpers import chestnut_present, wait_for_chestnut
+from openpilot.selfdrive.modeld.helpers import BigModelRetry, chestnut_present, wait_for_chestnut
 from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.cereal.services import SERVICE_LIST
@@ -337,6 +337,7 @@ def main(demo=False):
 
   publish_state = PublishState()
   chestnut_state = ChestnutGpuState(pm, model.chestnut) if CHESTNUT else None
+  big_retry = BigModelRetry(params, enabled=CHESTNUT and not demo)
 
   # setup filter to track dropped frames
   frame_dropped_filter = FirstOrderFilter(0., 10., 1. / model.constants.MODEL_FREQ)
@@ -402,6 +403,11 @@ def main(demo=False):
       meta_extra = meta_main
 
     sm.update(0)
+    if big_retry.pending:
+      cs, cc = sm["carState"], sm["carControl"]
+      parked = sm.alive["carState"] and cs.gearShifter in (car.CarState.GearShifter.park, car.CarState.GearShifter.neutral)
+      if big_retry.update(time.monotonic(), parked, cs.vEgo, cc.enabled or cc.latActive or cc.longActive, sm["deviceState"].chestnutPresent):
+        cloudlog.error("big model failed while parked, cycling onroad to retry")
     desire = DH.desire
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
@@ -468,6 +474,7 @@ def main(demo=False):
       params.put_bool("ChestnutActive", False)
       assert small_model is not None
       model = small_model
+      big_retry.failed(time.monotonic())
       if chestnut_state is not None:
         chestnut_state.big = False
       run_count = 0
