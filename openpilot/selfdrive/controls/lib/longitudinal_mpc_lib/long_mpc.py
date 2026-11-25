@@ -54,7 +54,7 @@ T_IDXS = np.array(T_IDXS_LST)
 FCW_IDXS = T_IDXS < 5.0
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 COMFORT_BRAKE = 2.5
-STOP_DISTANCE = 5.0     # Teramont X fork: was 6.0.  Compiled into the solver: the comma must rebuild (no "prebuilt" file) after a change
+STOP_DISTANCE = 4.0     # Teramont X fork: was 6.0.  Compiled into the solver: the comma must rebuild (no "prebuilt" file) after a change
 MIN_X_LEAD_FACTOR = 0.5
 
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
