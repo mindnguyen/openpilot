@@ -287,13 +287,12 @@ def main(demo=False):
     loader.start()
     loader.join(BIG_MODEL_TIMEOUT)
     model = big_model
-    if model is None and not params.get_bool("ChestnutRetry"):
-      # a crank can cut the chestnut power during the load, retry once with an onroad cycle
-      cloudlog.error("big model load failed, cycling onroad to retry")
-      params.put_bool("ChestnutRetry", True)
-      params.put_bool("OnroadCycleRequested", True)
-    else:
-      params.put_bool("ChestnutActive", model is not None)
+    if model is None:
+      # Teramont X fork: no onroad cycle to retry the load.  The cycle stops openpilot's ACC frames for a few seconds and
+      # with openpilot longitudinal the car's TSK latches a fault until the next ignition ("Cruise Fault" for the whole
+      # drive, 26/11/2026 07:44 and 08:09).  The small model drives; the big model is tried again at the next ignition.
+      cloudlog.error("big model load failed, the small model drives until the next ignition")
+    params.put_bool("ChestnutActive", model is not None)
 
   small_model = ModelState(vipc_client_main.width, vipc_client_main.height, False) if model is None or CHESTNUT else None
   if model is None:
